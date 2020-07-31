@@ -21,15 +21,11 @@ class ImageClassifier(VisionHandler):
     def __init__(self):
         super(ImageClassifier, self).__init__()
 
-    def preprocess(self, data):
+    def preprocess(self, image):
         """
          Scales, crops, and normalizes a PIL image for a PyTorch model,
          returns an Numpy array
         """
-        image = data[0].get("data")
-        if image is None:
-            image = data[0].get("body")
-
         my_preprocess = transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),
@@ -45,7 +41,6 @@ class ImageClassifier(VisionHandler):
         ''' Predict the class (or classes) of an image using a trained deep learning model.
         '''
         # Convert 2D image to 1D vector
-        topk = 5
         data = np.expand_dims(data, 0)
         data = torch.from_numpy(data)
 
@@ -53,6 +48,11 @@ class ImageClassifier(VisionHandler):
         outputs = self.model.forward(inputs)
 
         ps = F.softmax(outputs, dim=1)
+
+        return ps
+
+    def postprocess(self, ps):
+        topk = 5
         topk = getattr(ps, self.device.type)().topk(topk)
 
         probs, classes = (e.cpu().data.numpy().squeeze().tolist() for e in topk)
@@ -71,31 +71,27 @@ class ImageClassifier(VisionHandler):
                 results.append(tmp)
             else:
                 results.append({str(classes[index]):str(probs[index])})
-
         return [results]
 
-    def postprocess(self, data):
-        return data
+handle = ImageClassifier.get_default_handler()
 
+#_service = ImageClassifier()
 
-_service = ImageClassifier()
+# def handle(data, context):
+#     """
+#     Entry point for image classifier default handler
+#     """
+#     try:
+#         if not _service.initialized:
+#             _service.initialize(context)
 
+#         if data is None:
+#             return None
 
-def handle(data, context):
-    """
-    Entry point for image classifier default handler
-    """
-    try:
-        if not _service.initialized:
-            _service.initialize(context)
+#         data = _service.preprocess(data)
+#         data = _service.inference(data)
+#         data = _service.postprocess(data)
 
-        if data is None:
-            return None
-
-        data = _service.preprocess(data)
-        data = _service.inference(data)
-        data = _service.postprocess(data)
-
-        return data
-    except Exception as e:
-        raise Exception("Please provide a custom handler in the model archive." + e)
+#         return data
+#     except Exception as e:
+#         raise Exception("Please provide a custom handler in the model archive." + e)

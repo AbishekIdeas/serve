@@ -18,7 +18,7 @@ class TextClassifier(TextHandler):
     def __init__(self):
         super(TextClassifier, self).__init__()
 
-    def preprocess(self, data):
+    def preprocess(self, text):
         """
         Normalizes the input text for PyTorch model using following basic cleanup operations :
             - remove html tags
@@ -30,10 +30,6 @@ class TextClassifier(TextHandler):
         Returns a Numpy array.
         """
         ngrams = 2
-
-        text = data[0].get("data")
-        if text is None:
-            text = data[0].get("body")
         text = text.decode('utf-8')
 
         text = self._remove_html_tags(text)
@@ -63,24 +59,4 @@ class TextClassifier(TextHandler):
         return data
 
 
-_service = TextClassifier()
-
-
-def handle(data, context):
-    """
-    Entry point for text classifier default handler
-    """
-    try:
-        if not _service.initialized:
-            _service.initialize(context)
-
-        if data is None:
-            return None
-
-        data = _service.preprocess(data)
-        data = _service.inference(data)
-        data = _service.postprocess(data)
-
-        return data
-    except Exception as e:
-        raise Exception("Please provide a custom handler in the model archive." + e)
+handle = TextClassifier().get_default_handler()

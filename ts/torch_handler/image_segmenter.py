@@ -17,7 +17,7 @@ class ImangeSegmenter(VisionHandler):
     def __init__(self):
         super(ImangeSegmenter, self).__init__()
 
-    def preprocess(self, data):
+    def preprocess(self, image):
         """
         Resize the image to (256 x 256)
         CenterCrop it to (224 x 224)
@@ -26,9 +26,6 @@ class ImangeSegmenter(VisionHandler):
         std = [0.229, 0.224, 0.225]
         And unsqueeze to make [1 x C x H x W] from [C x H x W]
         """
-        image = data[0].get("data")
-        if image is None:
-            image = data[0].get("body")
         image = Image.open(io.BytesIO(image))
         trf = T.Compose([T.Resize(256),
                          T.CenterCrop(224),
@@ -48,25 +45,5 @@ class ImangeSegmenter(VisionHandler):
     def postprocess(self, data):
         return data
 
-
-_service = ImangeSegmenter()
-
-
-def handle(data, context):
-    """
-    Entry point for image segmenter default handler
-    """
-    try:
-        if not _service.initialized:
-            _service.initialize(context)
-
-        if data is None:
-            return None
-
-        data = _service.preprocess(data)
-        data = _service.inference(data)
-        data = _service.postprocess(data)
-
-        return data
-    except Exception as e:
-        raise Exception("Please provide a custom handler in the model archive." + e)
+#Entry point for image segmenter default handler
+handle = ImangeSegmenter().get_default_handler()

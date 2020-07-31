@@ -30,15 +30,11 @@ class ObjectDetector(VisionHandler):
             self.model.eval()
             self.initialized = True
 
-    def preprocess(self, data):
+    def preprocess(self, image):
         """
          Scales, crops, and normalizes a image for a PyTorch model,
          returns an Numpy array
         """
-        image = data[0].get("data")
-        if image is None:
-            image = data[0].get("body")
-
         my_preprocess = transforms.Compose([transforms.ToTensor()])
         image = Image.open(io.BytesIO(image))
         image = my_preprocess(image)
@@ -80,27 +76,5 @@ class ObjectDetector(VisionHandler):
             raise Exception('Object name list file should be json format - {"object_type_names":["person","car"...]}"'
                             + e)
 
-
-_service = ObjectDetector()
-
-
-def handle(data, context):
-    """
-    Entry point for object detector default handler
-    """
-    try:
-        if not _service.initialized:
-            _service.initialize(context)
-
-        if data is None:
-            return None
-
-        data = _service.preprocess(data)
-        data = _service.inference(data)
-
-        if data:
-            return _service.postprocess(data)
-        else:
-            return [[]]
-    except Exception as e:
-        raise Exception("Please provide a custom handler in the model archive." + e)
+#Entry point for object detector default handler
+handle = ObjectDetector().get_default_handler()

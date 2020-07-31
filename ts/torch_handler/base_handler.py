@@ -10,9 +10,9 @@ import importlib
 
 import torch
 from ..utils.util import list_classes_from_module
-
 logger = logging.getLogger(__name__)
 
+_singleton_handler  = None
 
 class BaseHandler(abc.ABC):
     """
@@ -25,21 +25,60 @@ class BaseHandler(abc.ABC):
         self.device = None
         self.initialized = False
         self.manifest = None
+        self.model_dir = None
+        self.model_pt_path = None
 
-    def initialize(self, ctx):
-        """First try to load torchscript else load eager mode state_dict based model"""
-
+    def load_model_path(self,ctx):
+        """
+        This prepares the model path. 
+        This can be overriden in the CustomHandlers
+        """
         self.manifest = ctx.manifest
 
         properties = ctx.system_properties
-        model_dir = properties.get("model_dir")
+        self.model_dir = properties.get("model_dir")
         self.device = torch.device("cuda:" + str(properties.get("gpu_id")) if torch.cuda.is_available() else "cpu")
 
         # model serialize/pt file
         serialized_file = self.manifest['model']['serializedFile']
-        model_pt_path = os.path.join(model_dir, serialized_file)
-        if not os.path.isfile(model_pt_path):
+        self.model_pt_path = os.path.join(self.model_dir, serialized_file)
+        if not os.path.isfile(self.model_pt_path):
             raise RuntimeError("Missing the model.pt file")
+
+    
+    def load_label_mapping(self):
+        """
+        This loads the labels from a json file provided.
+        This can be overriden in the CustomHandlers
+        """
+        mapping_file_path = os.path.join(self.model_dir, "index_to_name.json")
+
+        if os.path.isfile(mapping_file_path):
+            with open(mapping_file_path) as f:
+                self.mapping = json.load(f)
+        else:
+            logger.warning('Missing the index_to_name.json file. Inference output will not include class name.')
+
+    def get_input(self,data):
+        """
+        This gets the data from request and pass it to the preprocess function.
+        This can be overriden in the CustomHandlers
+        """
+        text = data[0].get("data")
+        if text is None:
+            input_data = data[0].get("body")
+        return input_data
+
+    def map_label_to_class(output):
+        
+        if self.mapping:
+            output = self.mapping[str(output)]
+
+    def initialize(self, ctx):
+        """
+        First try to load torchscript else load eager mode state_dict based model
+        """
+        self.load_model_path(ctx)
 
         map_location = 'cuda' if torch.cuda.is_available() else 'cpu'
         if 'modelFile' in self.manifest['model']:
@@ -51,36 +90,84 @@ class BaseHandler(abc.ABC):
                     model_class_definitions))
 
             model_class = model_class_definitions[0]
-            state_dict = torch.load(model_pt_path, map_location=map_location)
+            state_dict = torch.load(self.model_pt_path, map_location=map_location)
             self.model = model_class()
             self.model.load_state_dict(state_dict)
         else:
             logger.debug('No model file found for eager mode, trying to load torchscript model')
-            self.model = torch.jit.load(model_pt_path, map_location=map_location)
+            self.model = torch.jit.load(self.model_pt_path, map_location=map_location)
 
         self.model.to(self.device)
         self.model.eval()
 
-        logger.debug('Model file %s loaded successfully', model_pt_path)
+        logger.debug('Model file %s loaded successfully', self.model_pt_path)
         # Read the mapping file, index to object name
-        mapping_file_path = os.path.join(model_dir, "index_to_name.json")
-
-        if os.path.isfile(mapping_file_path):
-            with open(mapping_file_path) as f:
-                self.mapping = json.load(f)
-        else:
-            logger.warning('Missing the index_to_name.json file. Inference output will not include class name.')
+        self.load_label_mapping()
 
         self.initialized = True
 
-    @abc.abstractmethod
-    def preprocess(self, data):
-        pass
+    def preprocess(self, input_data):
+        """
+        The default implementation of preprocess. This will get executed
+        if the user doesn't provide implementation in his CustomHandler
+        """
+        input_data = torch.as_tensor(input_data)
+        return [input_data]
 
-    @abc.abstractmethod
     def inference(self, data):
-        pass
+        """
+        The default implementation of inference. This will get executed
+        if the user doesn't provide implementation in his CustomHandler
+        """
+        torch_data = torch.as_tensor(data, device=self.device)
+        output = self.model(torch_data)
+        output = output.to('cpu')
+        return [output]
 
-    @abc.abstractmethod
     def postprocess(self, data):
-        pass
+        """
+        The default implementation of postprocess. This will get executed
+        if the user doesn't provide implementation in his CustomHandler
+        """
+        return data
+    
+
+    def _handle(self, data, context):
+        """
+        Entry point for CustomHandlers and Default Handlers. 
+        """
+        try :
+            if data is None:
+                return None
+
+            input_data = self.get_input(data)
+            processed = self.preprocess(input_data)
+            predictions = self.inference(processed)
+            if predictions:
+                return self.postprocess(predictions)
+            else:
+                return [[]]
+        
+        except Exception as e:
+            raise Exception("Please provide a custom handler in the model archive." + e)
+
+        return output
+     
+    @classmethod
+    def get_default_handler(cls, *args, **kwargs):
+        """
+        This provides a singleton handler to load the model on first request alone.
+        This should be called from the Custom and default handlers to get the handle function.
+        """
+        def handle(data, context):
+            global _singleton_handler
+            if _singleton_handler is None:
+                _singleton_handler = cls(*args, **kwargs)
+            if not _singleton_handler.initialized:
+                _singleton_handler.initialize(context)
+            return _singleton_handler._handle(data, context)
+        return handle
+    
+
+
+    
