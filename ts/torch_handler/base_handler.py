@@ -143,11 +143,8 @@ class BaseHandler(abc.ABC):
             input_data = self.get_input(data)
             processed = self.preprocess(input_data)
             predictions = self.inference(processed)
-            if predictions:
-                return self.postprocess(predictions)
-            else:
-                return [[]]
-        
+            output = self.postprocess(predictions)
+
         except Exception as e:
             raise Exception("Please provide a custom handler in the model archive." + e)
 
